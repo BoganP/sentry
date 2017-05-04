@@ -109,11 +109,11 @@ def migrate_events(source_id, destination_id, fingerprints, events):
         # where necessary. (This still isn't even guaranteed to catch all
         # of the events due to processing latency, but it's a better shot.)
         # Create a new destination group.
-        destination_id = Group.objects.create(
+        destination = Group.objects.create(
             project_id=project.id,
             short_id=project.next_short_id(),
             **get_group_creation_attributes(events)
-        ).id
+        )
 
         # Move the group hashes to the destination.
         # TODO: What happens if this ``GroupHash`` has already been
@@ -137,6 +137,9 @@ def migrate_events(source_id, destination_id, fingerprints, events):
         id__in=event_id_set,
     ).update(group_id=destination_id)
 
+    for event in events:
+        event.group = destination
+
     EventTag.objects.filter(
         project_id=project.id,
         event_id__in=event_id_set,
@@ -154,7 +157,21 @@ def migrate_events(source_id, destination_id, fingerprints, events):
         event_id__in=event_event_id_set,
     ).update(group=destination_id)
 
-    return destination_id
+    return destination.id
+
+
+def truncate_denormalizations(group_id):
+    # TODO: Delete `GroupTag{Key,Value}` data.
+    # TODO: Delete `GroupRelease` data. (XXX: Is this safe???)
+    # TODO: Delete TSDB data.
+    raise NotImplementedError
+
+
+def repair_denormalizations(events):
+    # TODO: Repair `GroupTag{Key,Value}` data. (Also test `EventTag` at this point.)
+    # TODO: Repair `GroupRelease` data.
+    # TODO: Repair TSDB data.
+    raise NotImplementedError
 
 
 def unmerge(source_id, destination_id, fingerprints, cursor=None, batch_size=500):
@@ -169,6 +186,9 @@ def unmerge(source_id, destination_id, fingerprints, cursor=None, batch_size=500
     # ``RangeQuerySetWrapper``. Ideally that could be refactored to be able to
     # be run without iteration by passing around a state object and we could
     # just use that here instead.
+
+    if cursor is None:
+        truncate_denormalizations(source_id)
 
     # We fetch the events in descending order by their primary key to get the
     # best approximation of the most recently received events.
@@ -194,10 +214,7 @@ def unmerge(source_id, destination_id, fingerprints, cursor=None, batch_size=500
         )
     )
 
-    # XXX: How does is this affected by partial failure?
-    # TODO: Migrate and repair `GroupTag{Key,Value}` data. (Also test `EventTag` at this point.)
-    # TODO: Migrate and repair `GroupRelease` data.
-    # TODO: Migrate and repair TSDB data.
+    repair_denormalizations(events)
 
     return unmerge(
         source_id,
